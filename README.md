@@ -1,7 +1,11 @@
 # Get-LogonCount
-Queries the logonCount attribute from all domain controllers (RWDC + RODC), for user accounts (and optionally computer accounts).<br>
-No dependencies — uses .NET DirectoryServices only.<br>
-#### Note: max value for LogonCount attribute is 65,535. Usually indicates programatic/service accounts.
+#### Queries the logonCount attribute from all domain controllers (RWDC + RODC), for all user accounts (and optionally computer accounts), or a specific account.<br>
+Helps to validate patterns (especially compared to WhenCreated, lastlogon etc.), resolve DC affinity issues etc.<br>
+Max value for LogonCount attribute is 65,535. Usually indicates programatic/service accounts.<br>
+No dependencies — uses .NET DirectoryServices only.
+
+<img src="/screenshots/screenshot_getlogoncount.png" alt="Sample default run" style="width:60%; height:auto;"><br>
+
 ### Examples:
 all user account
 ```
