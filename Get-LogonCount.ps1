@@ -1,7 +1,7 @@
 ﻿# Get-LogonCount.ps1
+# Queries the logonCount attribute from all domain controllers (RWDC + RODC) for all or specific user accounts (and optionally computer accounts), with optional lastlogon date.
+# version: 1.1
 # comments to yossis@protonmail.com
-# Queries the logonCount attribute from all domain controllers (RWDC + RODC)
-# for user accounts (and optionally computer accounts).
 # No dependencies — uses .NET DirectoryServices only.
 #
 # Examples:
@@ -9,6 +9,7 @@
 #   .\Get-LogonCount.ps1 -IncludeComputers                # users + computers
 #   .\Get-LogonCount.ps1 -SamAccountName svc_backup       # specific account
 #   .\Get-LogonCount.ps1 -SamAccountName "admin*"         # wildcard match
+#   .\Get-LogonCount.ps1 -IncludeLastLogonDate            # include last logon date
 #   .\Get-LogonCount.ps1 -ExportCsv                       # save report as CSV
 
 [CmdletBinding()]
@@ -18,10 +19,12 @@ param(
 
     [switch]$IncludeComputers,
 
+    [switch]$IncludeLastLogonDate,
+
     [switch]$ExportCsv
 )
 
-# ── Discover domain ──────────────────────────────────────────────────────────
+## Discover domain
 try {
     $rootDSE = [ADSI]'LDAP://RootDSE'
     $domainDN = $rootDSE.defaultNamingContext.Value
@@ -37,7 +40,7 @@ Write-Host ''
 Write-Host "  Get-LogonCount   Domain: $domainName" -ForegroundColor Green
 Write-Host ''
 
-# ── Discover all DCs (primaryGroupID 516 = RWDC, 521 = RODC) ────────────────
+## Discover all DCs (primaryGroupID 516 = RWDC, 521 = RODC)
 Write-Host '  Discovering domain controllers...' -ForegroundColor Cyan
 
 $dcSearcher = New-Object System.DirectoryServices.DirectorySearcher
@@ -79,7 +82,7 @@ foreach ($dc in $domainControllers) {
 }
 Write-Host ''
 
-# ── Build LDAP filter ────────────────────────────────────────────────────────
+## Build LDAP filter 
 if ($SamAccountName) {
     # Specific account lookup — works with wildcards (e.g. svc_*)
     $ldapFilter = "(samAccountName=$SamAccountName)"
@@ -95,12 +98,13 @@ else {
 }
 Write-Host ''
 
-# ── Query each DC for logonCount ─────────────────────────────────────────────
+## Query each DC for logonCount 
 # logonCount increments on the DC that processes the logon, then replicates.
-# Due to replication latency and concurrent logons, values typically differ
-# across DCs — that's expected and why we query each one.
+# Due to replication latency and concurrent logons, values typically differ across DCs — that's expected and why we query each one.
 
-$accountData = @{}   # samAccountName -> @{ DCName = logonCount; ... }
+$accountData = @{}      # samAccountName -> @{ DCName = logonCount; ... }
+$lastLogonData = @{}    # samAccountName -> [DateTime] most recent lastLogon across all DCs
+$lastLogonPerDC = @{}   # dcName -> @{ samAccountName = [DateTime]; ... }
 
 foreach ($dc in $domainControllers) {
     $dcName = $dc.Name
@@ -110,7 +114,9 @@ foreach ($dc in $domainControllers) {
         $searcher = New-Object System.DirectoryServices.DirectorySearcher
         $searcher.SearchRoot = [ADSI]"LDAP://$($dc.HostName)/$domainDN"
         $searcher.Filter = $ldapFilter
-        $searcher.PropertiesToLoad.AddRange(@('samAccountName', 'logonCount'))
+        $propsToLoad = @('samAccountName', 'logonCount')
+        if ($IncludeLastLogonDate) { $propsToLoad += 'lastLogon' }
+        $searcher.PropertiesToLoad.AddRange($propsToLoad)
         $searcher.PageSize = 1000
         $searcher.SizeLimit = 0
 
@@ -128,6 +134,20 @@ foreach ($dc in $domainControllers) {
                 $accountData[$sam] = @{}
             }
             $accountData[$sam][$dcName] = $logonCount
+
+            if ($IncludeLastLogonDate -and $result.Properties['lastlogon'].Count -gt 0) {
+                $fileTime = [long]$result.Properties['lastlogon'][0]
+                if ($fileTime -gt 0) {
+                    $logonDate = [DateTime]::FromFileTime($fileTime)
+                    if (-not $lastLogonData.ContainsKey($sam) -or $logonDate -gt $lastLogonData[$sam]) {
+                        $lastLogonData[$sam] = $logonDate
+                    }
+                    if (-not $lastLogonPerDC.ContainsKey($dcName)) {
+                        $lastLogonPerDC[$dcName] = @{}
+                    }
+                    $lastLogonPerDC[$dcName][$sam] = $logonDate
+                }
+            }
             $queryCount++
         }
         $results.Dispose()
@@ -146,7 +166,7 @@ if ($accountData.Count -eq 0) {
     exit 0
 }
 
-# ── Build per-account output ─────────────────────────────────────────────────
+## Build per-account output
 # A dash (-) means the account was not returned by that DC (common with RODCs
 # that only replicate a subset of accounts via the Password Replication Policy).
 
@@ -164,12 +184,20 @@ $output = foreach ($sam in $accountData.Keys | Sort-Object) {
         }
     }
     $props['Total'] = $total
+    if ($IncludeLastLogonDate) {
+        if ($lastLogonData.ContainsKey($sam)) {
+            $props['LastLogonDate'] = $lastLogonData[$sam].ToString('yyyy-MM-dd HH:mm:ss')
+        }
+        else {
+            $props['LastLogonDate'] = 'Never'
+        }
+    }
     [PSCustomObject]$props
 }
 
 $output | Sort-Object Total -Descending | Format-Table -AutoSize
 
-# ── DC summary stats ─────────────────────────────────────────────────────────
+## DC summary stats
 Write-Host '  Logon Statistics per DC:' -ForegroundColor Cyan
 Write-Host "  $('-' * 56)" -ForegroundColor DarkGray
 
@@ -185,12 +213,20 @@ $dcStats = foreach ($dcName in $dcNames) {
         }
     }
 
-    [PSCustomObject]@{
+    $dcObj = [ordered]@{
         DC          = $dcName
         Type        = $dcType
         Accounts    = $dcAccountCount
         TotalLogons = $dcTotal
     }
+    if ($IncludeLastLogonDate -and $lastLogonPerDC.ContainsKey($dcName)) {
+        $latestOnDC = ($lastLogonPerDC[$dcName].Values | Sort-Object -Descending | Select-Object -First 1)
+        $dcObj['LatestLogon'] = $latestOnDC.ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    elseif ($IncludeLastLogonDate) {
+        $dcObj['LatestLogon'] = 'N/A'
+    }
+    [PSCustomObject]$dcObj
 }
 
 $dcStats | Format-Table -AutoSize
@@ -199,7 +235,7 @@ $grandTotal = ($dcStats | Measure-Object -Property TotalLogons -Sum).Sum
 Write-Host "  Grand Total: $($grandTotal.ToString('N0')) logons across $($domainControllers | measure-object | select -expand count) DCs, $($accountData.Count) accounts" -ForegroundColor Green
 Write-Host ''
 
-# ── Export to CSV ────────────────────────────────────────────────────────────
+# Export to CSV 
 if ($ExportCsv) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
