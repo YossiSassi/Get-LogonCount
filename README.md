@@ -4,7 +4,7 @@ Helps to validate patterns (especially compared to WhenCreated, lastlogon etc.),
 Max value for LogonCount attribute is 65,535. Usually indicates programatic/service accounts.<br>
 No dependencies — uses .NET DirectoryServices only.
 
-<img src="/screenshots/screenshot_getlogoncount.png" alt="Sample default run" style="width:70%; height:auto;"><br>
+<img src="/screenshots/screenshot_getlogoncount.png" alt="Sample default run" style="width:80%; height:auto;"><br>
 
 ### Examples:
 all user accounts
@@ -35,6 +35,6 @@ save report as CSV (all user accounts)
 ```
 .\Get-LogonCount.ps1 -ExportCsv
 ```
-<img src="/screenshots/screenshot_getlogoncountandlastlogondate.png" alt="Sample run with computers and lastlogon date" style="width:70%; height:auto;"><br>
+<img src="/screenshots/screenshot_getlogoncountandlastlogondate.png" alt="Sample run with computers and lastlogon date" style="width:80%; height:auto;"><br>
 
-<img src="/screenshots/dcstats.png" alt="epilogue of console output - dc statistics" style="width:70%; height:auto;"><br>
+<img src="/screenshots/dcstats.png" alt="epilogue of console output - dc statistics" style="width:80%; height:auto;"><br>
