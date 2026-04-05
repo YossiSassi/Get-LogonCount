@@ -1,6 +1,6 @@
 ﻿# Get-LogonCount.ps1
 # Queries the logonCount attribute from all domain controllers (RWDC + RODC) for all or specific user accounts (and optionally computer accounts), with optional lastlogon date.
-# version: 1.1
+# version: 1.2
 # comments to yossis@protonmail.com
 # No dependencies — uses .NET DirectoryServices only.
 #
@@ -103,6 +103,7 @@ Write-Host ''
 # Due to replication latency and concurrent logons, values typically differ across DCs — that's expected and why we query each one.
 
 $accountData = @{}      # samAccountName -> @{ DCName = logonCount; ... }
+$whenCreatedData = @{}  # samAccountName -> [DateTime] whenCreated (replicated, same on all DCs)
 $lastLogonData = @{}    # samAccountName -> [DateTime] most recent lastLogon across all DCs
 $lastLogonPerDC = @{}   # dcName -> @{ samAccountName = [DateTime]; ... }
 
@@ -114,7 +115,7 @@ foreach ($dc in $domainControllers) {
         $searcher = New-Object System.DirectoryServices.DirectorySearcher
         $searcher.SearchRoot = [ADSI]"LDAP://$($dc.HostName)/$domainDN"
         $searcher.Filter = $ldapFilter
-        $propsToLoad = @('samAccountName', 'logonCount')
+        $propsToLoad = @('samAccountName', 'logonCount', 'whenCreated')
         if ($IncludeLastLogonDate) { $propsToLoad += 'lastLogon' }
         $searcher.PropertiesToLoad.AddRange($propsToLoad)
         $searcher.PageSize = 1000
@@ -134,6 +135,10 @@ foreach ($dc in $domainControllers) {
                 $accountData[$sam] = @{}
             }
             $accountData[$sam][$dcName] = $logonCount
+
+            if (-not $whenCreatedData.ContainsKey($sam) -and $result.Properties['whencreated'].Count -gt 0) {
+                $whenCreatedData[$sam] = [DateTime]$result.Properties['whencreated'][0]
+            }
 
             if ($IncludeLastLogonDate -and $result.Properties['lastlogon'].Count -gt 0) {
                 $fileTime = [long]$result.Properties['lastlogon'][0]
@@ -184,6 +189,18 @@ $output = foreach ($sam in $accountData.Keys | Sort-Object) {
         }
     }
     $props['Total'] = $total
+    if ($whenCreatedData.ContainsKey($sam)) {
+        $created = $whenCreatedData[$sam]
+        $props['WhenCreated'] = $created.ToString('yyyy-MM-dd HH:mm:ss')
+        $ageDays = [math]::Max(1, [int]((Get-Date) - $created).TotalDays)
+        $props['AccountAgeDays'] = $ageDays
+        $props['LogonsPerDay'] = [math]::Round($total / $ageDays, 2)
+    }
+    else {
+        $props['WhenCreated'] = 'N/A'
+        $props['AccountAgeDays'] = 'N/A'
+        $props['LogonsPerDay'] = 'N/A'
+    }
     if ($IncludeLastLogonDate) {
         if ($lastLogonData.ContainsKey($sam)) {
             $props['LastLogonDate'] = $lastLogonData[$sam].ToString('yyyy-MM-dd HH:mm:ss')
