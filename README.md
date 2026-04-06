@@ -35,6 +35,12 @@ save report as CSV (all user accounts)
 ```
 .\Get-LogonCount.ps1 -ExportCsv
 ```
+all users & computers logon count + last logon date + export to CSV
+```
+.\Get-LogonCount.ps1 -IncludeComputers -IncludeLastLogonDate -ExportCSV
+```
+
 <img src="/screenshots/screenshot_getlogoncountandlastlogondate.png" alt="Sample run with computers and lastlogon date" style="width:90%; height:auto;"><br>
+#### DC statistics summary
 
 <img src="/screenshots/dcstats.png" alt="epilogue of console output - dc statistics" style="width:90%; height:auto;"><br>
