@@ -415,7 +415,7 @@ $mostActiveByLpd = $activeAccounts | Where-Object { $null -ne $_.LogonsPerDay } 
 
 $summary = [ordered]@{
     'Total accounts'           = $totalAccounts
-    'Activated (ever logged on)'       = "$activeCount ($activePct%)"
+    'Activated (ever loggedOn)'       = "$activeCount ($activePct%)"
     'Never logged on'          = $neverCount
     'Average LogonsPerDay'     = $avgLpd
     'Median LogonsPerDay'      = $medianLpd
