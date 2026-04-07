@@ -8,7 +8,7 @@ Needs to run from a domain-joined machine with permission to read AD (any authen
 ### Parameters:
 #### SamAccountName
 Limit the query to a specific account by samAccountName.<br>
-Wildcards (e.g. "svc_*", "admin*") are supported and passed through to the LDAP filter.<br><br>
+Wildcards (e.g. "svc_\*", "admin\*") are supported and passed through to the LDAP filter.<br><br>
 To query a computer account, add $ to the host name, e.g. SRV01$<br><br>
 When a single non-wildcard account is matched, the domain-wide summary and Top N leaderboards are suppressed (they are not meaningful for a single account).
 
