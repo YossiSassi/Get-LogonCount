@@ -1,6 +1,6 @@
 # Get-LogonCount.ps1
 # Queries the logonCount attribute from all domain controllers (RWDC + RODC) for all or specific user accounts (and optionally computer accounts), with additional statistics, and optional effective lastlogon date.
-# version: 1.3.1
+# version: 1.3.2
 # comments to yossis@protonmail.com
 # No dependencies — uses .NET DirectoryServices only.
 #
@@ -370,7 +370,46 @@ if ($Top -gt 0) {
     Write-Host "  Showing top $Top accounts (sorted by $SortBy)" -ForegroundColor DarkGray
 }
 
-$displayOutput | Format-Table -AutoSize
+# Fix/bypass Format-Table display limit - shows only first 10 properties (SamAccountName + DC names first, then the rest)
+$DisplayPropertyCount = ($displayOutput | Get-Member -MemberType Properties).count
+
+if ($DisplayPropertyCount -gt 10) {
+
+$DisplayPropertyList = New-Object System.Collections.ArrayList
+$DisplayPropertyList += "SamAccountName"
+$dcNames | foreach {$DisplayPropertyList += $_}
+
+if (-not $IncludeLastLogonDate) {
+switch ($DisplayPropertyCount) {
+    11 {$DisplayPropertyList += "Total", "ReplDivergence", "MissingFromRODC", "WhenCreated", "AccountAgeDays", "LogonsPerDay"}
+    12 {$DisplayPropertyList += "Total", "MissingFromRODC", "WhenCreated", "AccountAgeDays", "LogonsPerDay"}
+    13 {$DisplayPropertyList += "Total", "WhenCreated", "AccountAgeDays", "LogonsPerDay"}
+    14 {$DisplayPropertyList += "Total", "AccountAgeDays", "LogonsPerDay"}
+    15 {$DisplayPropertyList += "Total", "LogonsPerDay"}
+    {$DisplayPropertyCount -ge 16} {$DisplayPropertyList}
+  }
+}
+else
+{
+switch ($DisplayPropertyCount) {
+    11 {$DisplayPropertyList += "Total", "MissingFromRODC", "WhenCreated", "AccountAgeDays", "LogonsPerDay", "LastLogonDate"}
+    12 {$DisplayPropertyList += "Total", "WhenCreated", "AccountAgeDays", "LogonsPerDay", "LastLogonDate"}
+    13 {$DisplayPropertyList += "Total", "AccountAgeDays", "LogonsPerDay", "LastLogonDate"}
+    14 {$DisplayPropertyList += "Total", "LogonsPerDay", "LastLogonDate"}
+    15 {$DisplayPropertyList += "Total", "LastLogonDate"}
+    16 {$DisplayPropertyList += "LastLogonDate"}
+    {$DisplayPropertyCount -ge 17} {$DisplayPropertyList}
+  }
+}
+
+$displayOutput | Select-Object -Property $DisplayPropertyList | Format-Table -AutoSize
+
+}
+
+else 
+{
+    $displayOutput | Format-Table -AutoSize
+}
 
 ## Domain-wide summary statistics
 # Skip domain summary + Top N sections when a single specific account was queried
