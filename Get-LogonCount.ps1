@@ -1,8 +1,8 @@
-ï»¿# Get-LogonCount.ps1
+# Get-LogonCount.ps1
 # Queries the logonCount attribute from all domain controllers (RWDC + RODC) for all or specific user accounts (and optionally computer accounts), with additional statistics, and optional effective lastlogon date.
-# version: 1.3
+# version: 1.3.1
 # comments to yossis@protonmail.com
-# No dependencies â€” uses .NET DirectoryServices only.
+# No dependencies — uses .NET DirectoryServices only.
 #
 # Quick Examples (see full help for more):
 #   .\Get-LogonCount.ps1                                  # all user accounts
@@ -34,7 +34,7 @@
     replication divergence between DCs, and optionally reports the most
     recent lastLogon timestamp across all DCs.
 
-    Requires no PowerShell modules â€” uses only .NET System.DirectoryServices.
+    Requires no PowerShell modules — uses only .NET System.DirectoryServices.
     Needs to run from a domain-joined machine with permission to read AD (any authenticated user).
 
 .PARAMETER SamAccountName
@@ -111,7 +111,7 @@
     Author : yossis@protonmail.com
     Version: 1.3
 
-    logonCount is non-replicated â€” values typically differ across DCs.
+    logonCount is non-replicated — values typically differ across DCs.
     A dash (-) in the per-DC columns means the account was not returned
     by that DC, which is common with RODCs that only replicate a subset
     of accounts via the Password Replication Policy.
@@ -198,7 +198,7 @@ Write-Host ''
 
 ## Build LDAP filter 
 if ($SamAccountName) {
-    # Specific account lookup â€” works with wildcards (e.g. svc_*)
+    # Specific account lookup — works with wildcards (e.g. svc_*)
     $ldapFilter = "(samAccountName=$SamAccountName)"
     Write-Host "  Filter: samAccountName=$SamAccountName" -ForegroundColor White
 }
@@ -214,7 +214,7 @@ Write-Host ''
 
 ## Query each DC for logonCount 
 # logonCount increments on the DC that processes the logon, then replicates.
-# Due to replication latency and concurrent logons, values typically differ across DCs â€” that's expected and why we query each one.
+# Due to replication latency and concurrent logons, values typically differ across DCs - that's expected and why we query each one.
 
 $accountData = @{}      # samAccountName -> @{ DCName = logonCount; ... }
 $whenCreatedData = @{}  # samAccountName -> [DateTime] whenCreated (replicated, same on all DCs)
@@ -388,7 +388,7 @@ $activeCount    = ($activeAccounts | Measure-Object).Count
 $neverCount     = ($neverAccounts  | Measure-Object).Count
 $activePct      = if ($totalAccounts -gt 0) { [math]::Round(($activeCount / $totalAccounts) * 100, 1) } else { 0 }
 
-# LogonsPerDay stats â€” only for accounts that have logged on at least once and have a valid age
+# LogonsPerDay stats — only for accounts that have logged on at least once and have a valid age
 $lpdValues = $activeAccounts | Where-Object { $null -ne $_.LogonsPerDay } | ForEach-Object { [double]$_.LogonsPerDay }
 if ($lpdValues.Count -gt 0) {
     $avgLpd = [math]::Round(($lpdValues | Measure-Object -Average).Average, 2)
@@ -513,16 +513,20 @@ if ($ExportCsv) {
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $csvAccounts = Join-Path $scriptDir "LogonCount_Accounts_$timestamp.csv"
     $csvDcStats  = Join-Path $scriptDir "LogonCount_DCs_$timestamp.csv"
-    $csvSummary  = Join-Path $scriptDir "LogonCount_Summary_$timestamp.csv"
-
+    
     $displayOutput | Export-Csv -Path $csvAccounts -NoTypeInformation -Encoding UTF8
     $dcStats | Export-Csv -Path $csvDcStats -NoTypeInformation -Encoding UTF8
-    $summary.GetEnumerator() | ForEach-Object { [PSCustomObject]@{ Metric = $_.Key; Value = $_.Value } } |
-        Export-Csv -Path $csvSummary -NoTypeInformation -Encoding UTF8
-
+    
     Write-Host "  CSV exported:" -ForegroundColor Cyan
     Write-Host "    Accounts: $csvAccounts" -ForegroundColor White
     Write-Host "    DC Stats: $csvDcStats" -ForegroundColor White
-    Write-Host "    Summary:  $csvSummary" -ForegroundColor White
+    
+    if (-not $singleAccountQuery) {
+        $csvSummary  = Join-Path $scriptDir "LogonCount_Summary_$timestamp.csv"
+            $summary.GetEnumerator() | ForEach-Object { [PSCustomObject]@{ Metric = $_.Key; Value = $_.Value } } |
+        Export-Csv -Path $csvSummary -NoTypeInformation -Encoding UTF8
+        Write-Host "    Summary:  $csvSummary" -ForegroundColor White
+    }
+
     Write-Host ''
 }
