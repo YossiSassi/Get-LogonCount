@@ -1,8 +1,8 @@
 # Get-LogonCount.ps1
 # Queries the logonCount attribute from all domain controllers (RWDC + RODC) for all or specific user accounts (and optionally computer accounts), with additional statistics, and optional effective lastlogon date.
-# version: 1.3.2
+# version: 1.3.3
 # comments to yossis@protonmail.com
-# No dependencies — uses .NET DirectoryServices only.
+# No dependencies; uses .NET DirectoryServices only.
 #
 # Quick Examples (see full help for more):
 #   .\Get-LogonCount.ps1                                  # all user accounts
@@ -34,7 +34,7 @@
     replication divergence between DCs, and optionally reports the most
     recent lastLogon timestamp across all DCs.
 
-    Requires no PowerShell modules — uses only .NET System.DirectoryServices.
+    Requires no PowerShell modules ? uses only .NET System.DirectoryServices.
     Needs to run from a domain-joined machine with permission to read AD (any authenticated user).
 
 .PARAMETER SamAccountName
@@ -111,7 +111,7 @@
     Author : yossis@protonmail.com
     Version: 1.3
 
-    logonCount is non-replicated — values typically differ across DCs.
+    logonCount is non-replicated ? values typically differ across DCs.
     A dash (-) in the per-DC columns means the account was not returned
     by that DC, which is common with RODCs that only replicate a subset
     of accounts via the Password Replication Policy.
@@ -198,7 +198,7 @@ Write-Host ''
 
 ## Build LDAP filter 
 if ($SamAccountName) {
-    # Specific account lookup — works with wildcards (e.g. svc_*)
+    # Specific account lookup ? works with wildcards (e.g. svc_*)
     $ldapFilter = "(samAccountName=$SamAccountName)"
     Write-Host "  Filter: samAccountName=$SamAccountName" -ForegroundColor White
 }
@@ -220,10 +220,30 @@ $accountData = @{}      # samAccountName -> @{ DCName = logonCount; ... }
 $whenCreatedData = @{}  # samAccountName -> [DateTime] whenCreated (replicated, same on all DCs)
 $lastLogonData = @{}    # samAccountName -> [DateTime] most recent lastLogon across all DCs
 $lastLogonPerDC = @{}   # dcName -> @{ samAccountName = [DateTime]; ... }
+$respondingDCs = @()    # DCs that responded successfully
+$failedDCs = @()        # DCs that failed to respond
 
 foreach ($dc in $domainControllers) {
     $dcName = $dc.Name
     Write-Host "  Querying $dcName..." -ForegroundColor Yellow -NoNewline
+
+    # Quick LDAP port check before attempting a full query
+    $tcpClient = New-Object System.Net.Sockets.TcpClient
+    try {
+        $portOpen = $tcpClient.ConnectAsync($dc.HostName, 389).Wait(200)
+    }
+    catch {
+        $portOpen = $false
+    }
+    finally {
+        $tcpClient.Dispose()
+    }
+
+    if (-not $portOpen) {
+        Write-Host " UNREACHABLE (LDAP port 389 timeout)" -ForegroundColor Red
+        $failedDCs += $dcName
+        continue
+    }
 
     try {
         $searcher = New-Object System.DirectoryServices.DirectorySearcher
@@ -271,10 +291,12 @@ foreach ($dc in $domainControllers) {
         }
         $results.Dispose()
 
-        Write-Host " $queryCount accounts" -ForegroundColor Green
+        Write-Host " $queryCount account(s)" -ForegroundColor Green
+        $respondingDCs += $dcName
     }
     catch {
         Write-Host " FAILED ($($_.Exception.Message))" -ForegroundColor Red
+        $failedDCs += $dcName
     }
 }
 
@@ -427,7 +449,7 @@ $activeCount    = ($activeAccounts | Measure-Object).Count
 $neverCount     = ($neverAccounts  | Measure-Object).Count
 $activePct      = if ($totalAccounts -gt 0) { [math]::Round(($activeCount / $totalAccounts) * 100, 1) } else { 0 }
 
-# LogonsPerDay stats — only for accounts that have logged on at least once and have a valid age
+# LogonsPerDay stats - only for accounts that have logged on at least once and have a valid age
 $lpdValues = $activeAccounts | Where-Object { $null -ne $_.LogonsPerDay } | ForEach-Object { [double]$_.LogonsPerDay }
 if ($lpdValues.Count -gt 0) {
     $avgLpd = [math]::Round(($lpdValues | Measure-Object -Average).Average, 2)
@@ -524,9 +546,11 @@ $dcStats = foreach ($dcName in $dcNames) {
         }
     }
 
+    $dcStatus = if ($failedDCs -contains $dcName) { 'FAILED' } else { 'OK' }
     $dcObj = [ordered]@{
         DC          = $dcName
         Type        = $dcType
+        Status      = $dcStatus
         Accounts    = $dcAccountCount
         TotalLogons = $dcTotal
     }
@@ -543,7 +567,17 @@ $dcStats = foreach ($dcName in $dcNames) {
 $dcStats | Format-Table -AutoSize
 
 $grandTotal = ($dcStats | Measure-Object -Property TotalLogons -Sum).Sum
-Write-Host "  Grand Total: $($grandTotal.ToString('N0')) logons across $($domainControllers | measure-object | select -expand count) DCs, $($accountData.Count) accounts" -ForegroundColor Green
+$totalDCCount = $domainControllers.Count
+$respondingDCCount = $respondingDCs.Count
+$failedDCCount = $failedDCs.Count
+
+if ($failedDCCount -gt 0) {
+    Write-Host "  Grand Total: $($grandTotal.ToString('N0')) logons across $respondingDCCount responding DCs out of $totalDCCount DCs, $($accountData.Count) account(s)" -ForegroundColor Yellow
+    Write-Host "  WARNING: $failedDCCount DC(s) failed to respond: $($failedDCs -join ', ')" -ForegroundColor Red
+}
+else {
+    Write-Host "  Grand Total: $($grandTotal.ToString('N0')) logons across $totalDCCount DCs, $($accountData.Count) account(s)" -ForegroundColor Green
+}
 Write-Host ''
 
 # Export to CSV 
